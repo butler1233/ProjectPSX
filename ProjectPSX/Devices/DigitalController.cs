@@ -1,14 +1,12 @@
-﻿using System;
-using System.Collections.Generic;
-
-namespace ProjectPSX {
+﻿namespace ProjectPSX {
     internal class DigitalController : Controller {
 
-        ushort CONTROLLER_TYPE = 0x5A41; //digital
+        private ushort CONTROLLER_TYPE = 0x5A41; //digital
 
         private enum Mode {
             Idle,
-            Transfer
+            Connected,
+            Transfering,
         }
         Mode mode = Mode.Idle;
 
@@ -18,50 +16,46 @@ namespace ProjectPSX {
                     switch (b) {
                         case 0x01:
                             //Console.WriteLine("[Controller] Idle Process 0x01");
-                            mode = Mode.Transfer;
-                            enabled = true;
+                            mode = Mode.Connected;
                             ack = true;
                             return 0xFF;
                         default:
-                            //Console.WriteLine("[Controller] Idle value WARNING " + b);
+                            //Console.WriteLine($"[Controller] Idle Process Warning: {b:x2}");
+                            transferDataFifo.Clear();
                             ack = false;
                             return 0xFF;
                     }
 
-                case Mode.Transfer:
+                case Mode.Connected:
                     switch (b) {
-                        case 0x01:
-                            //Console.WriteLine("[Controller] ERROR Transfer Process 0x1");
-                            ack = true;
-                                return 0xFF;
                         case 0x42:
-                            //Console.WriteLine("[Controller] Transfer Process 0x42");
-                            mode = Mode.Transfer;
-                            ack = true;
+                            //Console.WriteLine("[Controller] Connected Init Transfer Process 0x42");
+                            mode = Mode.Transfering;
                             generateResponse();
+                            ack = true;
                             return transferDataFifo.Dequeue();
                         default:
-                            //Console.WriteLine("[Controller] Transfer Process" + b.ToString("x2"));
-                            byte data;
-                            if (transferDataFifo.Count == 0) {
-                                //Console.WriteLine("Changing to mode IDLE");
-                                enabled = false;
-                                mode = Mode.Idle;
-                                ack = false;
-                                data = 0xFF;
-                            } else {
-                                data = transferDataFifo.Dequeue();
-                            }
-                            return data;
+                            //Console.WriteLine("[Controller] Connected Transfer Process unknow command {b:x2} RESET TO IDLE");
+                            mode = Mode.Idle;
+                            transferDataFifo.Clear();
+                            ack = false;
+                            return 0xFF;
                     }
+
+                case Mode.Transfering:
+                    byte data = transferDataFifo.Dequeue();
+                    ack = transferDataFifo.Count > 0;
+                    if (!ack) {
+                        //Console.WriteLine("[Controller] Changing to idle");
+                        mode = Mode.Idle;
+                    }
+                    //Console.WriteLine($"[Controller] Transfer Process value:{b:x2} response: {data:x2} queueCount: {transferDataFifo.Count} ack: {ack}");
+                    return data;
                 default:
-                    //Console.WriteLine("[JOYPAD] Mode Warning");
-                    ack = false;
+                    //Console.WriteLine("[Controller] This should be unreachable");
                     return 0xFF;
             }
         }
-
-        bool enabled;
 
         public void generateResponse() {
             byte b0 = (byte)(CONTROLLER_TYPE & 0xFF);
@@ -76,12 +70,8 @@ namespace ProjectPSX {
             transferDataFifo.Enqueue(b3);
         }
 
-        public override void idle() {
+        public override void resetToIdle() {
             mode = Mode.Idle;
-        }
-
-        public override bool isEnabled() {
-            return enabled;
         }
     }
 }
